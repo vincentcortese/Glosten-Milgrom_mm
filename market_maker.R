@@ -1,116 +1,23 @@
-library(quantmod)
-library(alphavantager)
-
-# Creating the Myopically optimizing market maker - looking to implement the math
-# Then move to python once we can get something like this running
-
-# Potentially look to test this on stocks
-
+# library(quantmod)
+# library(alphavantager)
 # av_api_key("UQV2D45VFXJGX00J")
 # aapl <- as.data.frame(av_get(symbol = "AAPL", av_fun = "TIME_SERIES_INTRADAY",
 #                              interval = "1min", outputsize = "compact"))
 
-setwd("C:/Users/Vincent/Documents/Bitkub/Market Maker")
+setwd("C:/Users/Vincent/Documents/Bitkub/glosten-milgrom_mm")
 ba <- read.csv(file = 'BA.csv')
 # This data is actually really precise, link:
 # https://finance.yahoo.com/quote/BA/history?period1=1272646800&period2=1272906000&interval=1d&filter=history&frequency=1d
-
-# We can test this with live data from AAPL and trade accordingly
-# Use BA data instead, shows alot of information 
 
 # The total volume
 sum(ba$Volume, na.rm = T)
 
 # Removing the unncessary data
 ba <- ba[, c(-1, -2, -4, -5, -8, -11, -14)]
-min(ba$Price, na.rm = T)
-max(ba$Price, na.rm = T)
 
 summary(ba$Price, na.rm = T)
-sd(ba$Price, na.rm = T)
 
 ba$Spread <- ba$Ask.Price - ba$Bid.Price
-# ===================================== Initialize the numbers =============================
-
-# First step is to set a bid and ask price at the start of the day, and determining 
-# the initial true value
-
-
-# Consider percentage of uninformed vs informed traders 
-I <- .6
-v0 <- mean(c(ba$Bid.Price[1], ba$Ask.Price[1]))
-
-# initial normal model given the first distribution
-vi <- rnorm(100, mean = v0, sd = sd(ba$Price, na.rm = T))
-min(vi)
-max(vi)
-
-# So this will have to be updated to new values as we take on new values
-
-vi <- as.numeric(format(round(vi, 2), nsmall = 2))
-
-# =====================================================
-# This is a basic example of creating the Psell and Pb formulas
-# Definitely have to articulate them and make it cohesive
-# Also need to work in the white noise
-
-lst1 <- seq(from = v0 - 4*sd(ba$Price, na.rm = T), to = ba$Bid.Price[1] - 1, by = 1)
-
-lst2 <- seq(from = ba$Bid.Price[1], to = v0 + 4*sd(ba$Price, na.rm = T), by = 1)
-
-lst <- c(lst1, lst2)
-
-count <- 0
-for(i in 1:length(lst)){
-  temp <- (I + (1 - I)*.2)*dnorm(lst[i], v0, sd(ba$Price, na.rm = T))
-  count <- count + temp
-}
-count
-
-count2 <- 0
-for(i in 1:length(lst)){
-  temp2 <- (I + (1 - I)*.2)*lst[i]*dnorm(lst[i], v0, sd(ba$Price, na.rm = T))
-  count2 <- temp2 + count2
-}
-
-count2 * 1/count
-ba$Bid.Price[1]
-
-
-Psell <- function(I, 
-                  v0, 
-                  sd, 
-                  Bid_Price,
-                  trade_prob){
-  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = 1)
-  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = 1)
-  lst <- c(lst1, lst2)
-  count <- 0
-  for(i in 1:length(lst)){
-    temp <- (I + (1 - I)*trade_prob)*dnorm(lst[i], v0, sd(ba$Price, na.rm = T))
-    count <- count + temp
-  }
-  return(count)
-}
-
-Pb <- function(I, 
-               v0, 
-               sd, 
-               Bid_Price,
-               trade_prob){
-  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = 1)
-  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = 1)
-  lst <- c(lst1, lst2)
-  count2 <- 0
-  for(i in 1:length(lst)){
-    temp2 <- (I + (1 - I)*trade_prob)*lst[i]*dnorm(lst[i], v0, sd(ba$Price, na.rm = T))
-    count2 <- temp2 + count2
-  }
-  return (1/Psell(I, v0, sd, Bid_Price, trade_prob) * count2)
-}
-
-Pb(.5, 72.78, sd(ba$Price, na.rm = T), ba$Bid.Price[311], .2)
-
 
 # ==================================== Bid Price Equations =====================================
 
@@ -122,18 +29,22 @@ P_noise_sell <- function(I,
                   Bid_Price,
                   trade_prob,
                   noise_sd){
-  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = 1)
-  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = 1)
+  if(Bid_Price > v0 + 4 * sd || Bid_Price < v0 - 4*sd){
+    v0 <- Bid_Price
+  }
+  x <- rnorm(1, 0, noise_sd)
+  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = sd)
+  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = sd)
   count <- 0
-  for(i in 1:length(lst1)){
-    temp <- (I*(pnorm(rnorm(1, 0, noise_sd), (Bid_Price - lst1[i]), .1)) + 
-               (1 - I)*trade_prob)*dnorm(lst1[i], v0, sd(ba$Price, na.rm = T))
+  for(i in 1:length(lst1)){ 
+    temp <- (I*(pnorm(x, (Bid_Price - lst1[i]), .1)) + 
+               (1 - I)*trade_prob)*dnorm(lst1[i], v0, sd)
     count <- count + temp
   }
   count1 <- 0
   for(i in 1:length(lst2)){
-    temp <- (I*(1 - pnorm(rnorm(1, 0, noise_sd), (Bid_Price - lst2[i]), .1)) + 
-               (1 - I)*trade_prob)*dnorm(lst2[i], v0, sd(ba$Price, na.rm = T))
+    temp <- (I*(1 - pnorm(x, (Bid_Price - lst2[i]), .1)) + 
+               (1 - I)*trade_prob)*dnorm(lst2[i], v0, sd)
     count1 <- count1 + temp
   }
   return(count + count1)
@@ -147,30 +58,39 @@ P_noise_b <- function(I,
                Bid_Price,
                trade_prob, 
                noise_sd){
-  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = 1)
-  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = 1)
-  lst <- c(lst1, lst2)
+  if(Bid_Price > v0 + 4 * sd || Bid_Price < v0 - 4*sd){
+    v0 <- Bid_Price
+  }
+  x <- rnorm(1, 0, noise_sd)
+  lst1 <- seq(from = v0 - 4*sd, to = Bid_Price - 1, by = sd)
+  lst2 <- seq(from = Bid_Price, to = v0 + 4*sd, by = sd)
   count <- 0
   for(i in 1:length(lst1)){
-    temp <- (I*(pnorm(rnorm(1, 0, noise_sd), (Bid_Price - lst1[i]), .1)) + 
-               (1 - I)*trade_prob)*lst1[i]* dnorm(lst1[i], v0, sd(ba$Price, na.rm = T))
+    temp <- (I*(pnorm(x, (Bid_Price - lst1[i]), .1)) + 
+               (1 - I)*trade_prob)*lst1[i]* dnorm(lst1[i], v0, sd)
     count <- count + temp
   }
   count1 <- 0
   for(i in 1:length(lst2)){
-    temp <- (I*(1 - pnorm(rnorm(1, 0, noise_sd), (Bid_Price - lst2[i]), .1)) + 
-               (1 - I)*trade_prob)*lst2[i]*dnorm(lst2[i], v0, sd(ba$Price, na.rm = T))
+    temp <- (I*(1 - pnorm(x, (Bid_Price - lst2[i]), .1)) + 
+               (1 - I)*trade_prob)*lst2[i]*dnorm(lst2[i], v0, sd)
     count1 <- count1 + temp
   }
   return (1/P_noise_sell(I, v0, sd, Bid_Price, trade_prob, noise_sd) * (count + count1))
 }
 
 P_noise_b(I = .2, 
-          v0 = 72.48, 
+          v0 = mean(ba$Bid.Price[1], ba$Ask.Price[1]), 
           sd = sd(ba$Price, na.rm = T), 
-          Bid_Price = ba$Bid.Price[1], 
-          trade_prob = .5, 
-          noise_sd = .0001)
+          Bid_Price = 75, 
+          trade_prob = .8, 
+          noise_sd = .001)
+
+# Reducing the amount of I, decreases spread
+# v0 plays a significant role in determining the price
+# increasing trade_prob, decreases spread
+# 
+
 
 ba$Bid.Price[1]
 
@@ -183,19 +103,22 @@ P_noise_buy <- function(I,
                          Ask_Price,
                          trade_prob,
                          noise_sd){
-  lst1 <- seq(from = v0 - 4*sd, to = Ask_Price, by = 1)
-  lst2 <- seq(from = Ask_Price + 1, to = v0 + 4*sd, by = 1)
-  lst <- c(lst1, lst2)
+  if(Ask_Price > v0 + 4 * sd || Ask_Price < v0 - 4*sd){
+    v0 <- Ask_Price
+  }
+  x <- rnorm(1, 0, noise_sd)
+  lst1 <- seq(from = v0 - 4*sd, to = Ask_Price, by = sd)
+  lst2 <- seq(from = Ask_Price + 1, to = v0 + 4*sd, by = sd)
   count <- 0
   for(i in 1:length(lst1)){
-    temp <- (I*(1 - pnorm(rnorm(1, 0, noise_sd), (Ask_Price - lst1[i]), .1)) + 
-               (1 - I)*trade_prob)*dnorm(lst1[i], v0, sd(ba$Price, na.rm = T))
+    temp <- (I*(1 - pnorm(x, (Ask_Price - lst1[i]), .1)) + 
+               (1 - I)*trade_prob)*dnorm(lst1[i], v0, sd)
     count <- count + temp
   }
   count1 <- 0
   for(i in 1:length(lst2)){
-    temp <- (I*(pnorm(rnorm(1, 0, noise_sd), (Ask_Price - lst2[i]), .1)) + 
-               (1 - I)*trade_prob)*dnorm(lst2[i], v0, sd(ba$Price, na.rm = T))
+    temp <- (I*(pnorm(x, (lst2[i] - Ask_Price), .1)) + 
+               (1 - I)*trade_prob)*dnorm(lst2[i], v0, sd)
     count1 <- count1 + temp
   }
   return(count + count1)
@@ -209,30 +132,33 @@ P_noise_ask <- function(I,
                       Ask_Price,
                       trade_prob, 
                       noise_sd){
-  lst1 <- seq(from = v0 - 4*sd, to = Ask_Price, by = 1)
-  lst2 <- seq(from = Ask_Price + 1, to = v0 + 4*sd, by = 1)
-  lst <- c(lst1, lst2)
+  if(Ask_Price > v0 + 4 * sd || Ask_Price < v0 - 4*sd){
+    v0 <- Ask_Price
+  }
+  x <- rnorm(1, 0, noise_sd)
+  lst1 <- seq(from = v0 - 4*sd, to = Ask_Price, by = sd)
+  lst2 <- seq(from = Ask_Price + 1, to = v0 + 4*sd, by = sd)
   count <- 0
   for(i in 1:length(lst1)){
-    temp <- (I*(1 - pnorm(rnorm(1, 0, noise_sd), (Ask_Price - lst1[i]), .1)) + 
-               (1 - I)*trade_prob)*lst1[i]* dnorm(lst1[i], v0, sd(ba$Price, na.rm = T))
+    temp <- ((1 - I)*trade_prob + I*(1 - pnorm(x, (Ask_Price - lst1[i]), .1))) * 
+      lst1[i]* dnorm(lst1[i], v0, sd)
     count <- count + temp
   }
   count1 <- 0
   for(i in 1:length(lst2)){
-    temp <- (I*(pnorm(rnorm(1, 0, noise_sd), (Ask_Price - lst2[i]), .1)) + 
-               (1 - I)*trade_prob)*lst2[i]*dnorm(lst2[i], v0, sd(ba$Price, na.rm = T))
+    temp <- ((1 - I)*trade_prob + I*(pnorm(x, (lst2[i] - Ask_Price), .1))) * 
+      lst2[i]*dnorm(lst2[i], v0, sd)
     count1 <- count1 + temp
   }
   return (1/P_noise_buy(I, v0, sd, Ask_Price, trade_prob, noise_sd) * (count + count1))
 }
 
-P_noise_ask(I = .5, 
-          v0 = 72.5, 
+P_noise_ask(I = .2, 
+          v0 = 73, 
           sd = sd(ba$Price, na.rm = T), 
           Ask_Price = ba$Ask.Price[1], 
           trade_prob = .2, 
-          noise_sd = .001)
+          noise_sd = .01)
 
 ba$Ask.Price[1]
 
@@ -281,27 +207,39 @@ test$calc <- NA
 for(j in 1:nrow(ba)){
   if(ba$Type[j] == 'Trade'){
     v0 <- ba$Price[j]
-    test$calc[j] <- v0
+    test$calc[j] <- mean(test$bid[j - 1], test$ask[j - 1])
     lst <- seq(from = v0 - 4 * sd, to = v0 + 4*sd, by = 1)
-    next
   }
   if(v0 > max(lst) || v0 < min(lst)){
     lst <- seq(from = v0 - 4 * sd, to = v0 + 4*sd, by = 1)
   }
   if(count >= 6){
-    v0 <- mean(c(ba$Bid.Price[j], ba$Ask.Price[j]))
+    v0 <- mean(c(test$bid[j], test$ask[j]))
     count <- 0
   } else {
     tryCatch({
-    test$bid[j] <- P_noise_b(I = .7, v0 = v0 - .1, sd = sd, 
-                           Bid_Price = ba$Bid.Price[j], trade_prob = .5, noise_sd = .000025)
-    test$ask[j] <- P_noise_ask(I = .7, v0 = v0, sd = sd, 
-                             Ask_Price = ba$Ask.Price[j], trade_prob = .5, noise_sd = .000025)
+    test$bid[j] <- P_noise_b(I = .3, v0 = v0 - .2, sd = sd, 
+                           Bid_Price = ba$Bid.Price[j], trade_prob = .5, noise_sd = .00025)
+    test$ask[j] <- P_noise_ask(I = .3, v0 = v0 + .3, sd = sd, 
+                             Ask_Price = ba$Ask.Price[j], trade_prob = .5, noise_sd = .00025)
   count <- count + 1
     }, error = function(e){})
   }
 }
 test$Calc_spread <- test$ask - test$bid
+summary(test$Calc_spread)
+
+
+# This test is not working perfectly, we can create a list to 
+
+P_noise_b(I = .3, v0 = v0, sd = sd, 
+                         Bid_Price = ba$Bid.Price[1], trade_prob = .5, noise_sd = .00025)
+P_noise_ask(I = .3, v0 = v0, sd = sd, 
+                           Ask_Price = ba$Ask.Price[1], trade_prob = .5, noise_sd = .00025)
+
+
+
+
 
 # ===================== p and l =======================
 # in addition, we have to do a profit and loss calculation as we make each trade
@@ -317,12 +255,16 @@ test$Calc_spread <- test$ask - test$bid
 test <- ba[c(-1:-100)]
 test <- test[c(-101:-nrow(test)),]
 for(j in 1:100){
+  tryCatch({
   test$bid[j] <- P_noise_b(I = .7, v0 = 72.4, sd = sd(ba$Price, na.rm = T), 
-                           Bid_Price = ba$Bid.Price[1], trade_prob = .5, noise_sd = .000025)
-  test$ask[j] <- P_noise_ask(I = .7, v0 = 72.48, sd = sd(ba$Price, na.rm = T), 
-                             Ask_Price = ba$Ask.Price[1], trade_prob = .5, noise_sd = .000025)
+                           Bid_Price = ba$Bid.Price[j], trade_prob = .5, noise_sd = .000025)
+  test$ask[j] <- P_noise_ask(I = .7, v0 = 73.05, sd = sd(ba$Price, na.rm = T), 
+                             Ask_Price = ba$Ask.Price[j], trade_prob = .5, noise_sd = .000025)
+  }, error = function(e){})
 }
 
 test$spread <- test$ask - test$bid
 max(test$spread)
 min(test$spread)
+# ligma
+(73.05 -72.4) /2
